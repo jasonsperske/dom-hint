@@ -22,6 +22,7 @@ function createEnv(storageOverrides = {}) {
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    scope: { head: false, shadowRoots: false },
     ...storageOverrides,
   };
 
@@ -856,5 +857,168 @@ describe("session log", () => {
     assert.ok(clickEntry, "Should have entry for span added by click");
     assert.ok(clickEntry.trigger, "Entry should have trigger info");
     assert.ok(clickEntry.trigger.type, "Trigger should have a type");
+  });
+});
+
+describe("head observation", () => {
+  test("does not observe head by default", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const style = window.document.createElement("style");
+    style.textContent = "body { color: red; }";
+    window.document.head.appendChild(style);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("[added]") && l.includes("style")), "Should not log head mutations by default");
+  });
+
+  test("observes head mutations when scope.head is enabled", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: true, shadowRoots: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const style = window.document.createElement("style");
+    style.textContent = "body { color: blue; }";
+    window.document.head.appendChild(style);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("[added]") && l.includes("style")), "Should log style added to head");
+  });
+
+  test("observes meta tag additions to head", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: true, shadowRoots: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const meta = window.document.createElement("meta");
+    meta.setAttribute("name", "test");
+    meta.setAttribute("content", "value");
+    window.document.head.appendChild(meta);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("[added]") && l.includes("meta")), "Should log meta added to head");
+  });
+});
+
+describe("shadow DOM observation", () => {
+  test("does not observe shadow roots by default", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    const host = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = "<div id='sc'></div>";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("span");
+    el.className = "shadow-child";
+    shadow.getElementById("sc").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("shadow-child")), "Should not log shadow DOM mutations by default");
+  });
+
+  test("observes existing shadow roots when scope.shadowRoots is enabled", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: false, shadowRoots: true },
+    });
+    await injectScript(window);
+
+    const host = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = "<div id='sc'></div>";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("span");
+    el.className = "shadow-observed";
+    shadow.getElementById("sc").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("shadow-observed")), "Should log shadow DOM mutations");
+  });
+
+  test("observes dynamically created shadow roots", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: false, shadowRoots: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Create a new element with shadow root after observer starts
+    const host = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = "<div id='dynamic-sc'></div>";
+
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("p");
+    el.className = "dynamic-shadow";
+    shadow.getElementById("dynamic-sc").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("dynamic-shadow")), "Should observe dynamically added shadow root");
+  });
+
+  test("stops observing shadow roots on deactivation", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: false, shadowRoots: true },
+    });
+    await injectScript(window);
+
+    const host = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = "<div id='sc'></div>";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Stop watching
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("span");
+    el.className = "after-stop";
+    shadow.getElementById("sc").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("after-stop")), "Should not log after deactivation");
   });
 });

@@ -7,14 +7,16 @@
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    scope: { head: false, shadowRoots: false },
   };
-  let { prefix, hotkeys, mutationTypes, output } = await chrome.storage.sync.get(defaults);
+  let { prefix, hotkeys, mutationTypes, output, scope } = await chrome.storage.sync.get(defaults);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.prefix) prefix = changes.prefix.newValue;
     if (changes.hotkeys) hotkeys = changes.hotkeys.newValue;
     if (changes.mutationTypes) mutationTypes = changes.mutationTypes.newValue;
     if (changes.output) output = changes.output.newValue;
+    if (changes.scope) scope = changes.scope.newValue;
   });
 
   let sessionLog = [];
@@ -34,6 +36,7 @@
   let watching = false;
   let startTime = null;
   let observer = null;
+  let shadowObservers = [];
   let recentEvents = [];
 
   function elapsed() {
@@ -143,74 +146,103 @@
     recentEvents = [];
   }
 
-  function startObserver() {
-    observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === "childList") {
-          for (const node of mutation.addedNodes) {
-            if (node.nodeType !== Node.ELEMENT_NODE) continue;
-            if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
-            const trigger = inferTrigger(mutation.target);
-            const target = describeTarget(node);
-            const summary = `${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${target}`;
-            logEntry(summary, node.outerHTML, {
-              timestamp: Date.now(), elapsed: elapsed(), type: "added",
-              trigger, target, html: node.outerHTML,
-            });
-          }
-          for (const node of mutation.removedNodes) {
-            if (node.nodeType !== Node.ELEMENT_NODE) continue;
-            if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
-            const trigger = inferTrigger(mutation.target);
-            const target = describeTarget(node);
-            const summary = `${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${target}`;
-            logEntry(summary, node.outerHTML, {
-              timestamp: Date.now(), elapsed: elapsed(), type: "removed",
-              trigger, target, html: node.outerHTML,
-            });
-          }
-        } else if (mutation.type === "attributes") {
-          const el = mutation.target;
-          if (!matchesFilter(el)) continue;
-          const trigger = inferTrigger(el);
-          const attr = mutation.attributeName;
-          const oldVal = mutation.oldValue;
-          const newVal = el.getAttribute(attr);
-          const target = describeTarget(el);
-          const summary = `${prefix} [+${elapsed()}s] [attr] [${formatTrigger(trigger)}] ${target} ${attr}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
-          logEntry(summary, null, {
-            timestamp: Date.now(), elapsed: elapsed(), type: "attr",
-            trigger, target, attribute: attr, oldValue: oldVal, newValue: newVal,
-          });
-        } else if (mutation.type === "characterData") {
-          const parentEl = mutation.target.parentElement || mutation.target;
-          if (!matchesFilter(parentEl)) continue;
-          const trigger = inferTrigger(parentEl);
-          const oldVal = mutation.oldValue;
-          const newVal = mutation.target.textContent;
-          const target = describeTarget(mutation.target.parentElement);
-          const summary = `${prefix} [+${elapsed()}s] [text] [${formatTrigger(trigger)}] ${target}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
-          logEntry(summary, null, {
-            timestamp: Date.now(), elapsed: elapsed(), type: "text",
-            trigger, target, oldValue: oldVal, newValue: newVal,
-          });
-        }
-      }
-    });
-    const observerOptions = { subtree: true };
-    if (mutationTypes.childList) observerOptions.childList = true;
+  function getObserverOptions() {
+    const opts = { subtree: true };
+    if (mutationTypes.childList) opts.childList = true;
     if (mutationTypes.attributes) {
-      observerOptions.attributes = true;
-      observerOptions.attributeOldValue = true;
+      opts.attributes = true;
+      opts.attributeOldValue = true;
     }
     if (mutationTypes.characterData) {
-      observerOptions.characterData = true;
-      observerOptions.characterDataOldValue = true;
+      opts.characterData = true;
+      opts.characterDataOldValue = true;
     }
-    if (!observerOptions.childList && !observerOptions.attributes && !observerOptions.characterData) {
-      observerOptions.childList = true;
+    if (!opts.childList && !opts.attributes && !opts.characterData) {
+      opts.childList = true;
     }
-    observer.observe(document.body, observerOptions);
+    return opts;
+  }
+
+  function handleMutations(mutations) {
+    for (const mutation of mutations) {
+      if (mutation.type === "childList") {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
+          const trigger = inferTrigger(mutation.target);
+          const target = describeTarget(node);
+          const summary = `${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${target}`;
+          logEntry(summary, node.outerHTML, {
+            timestamp: Date.now(), elapsed: elapsed(), type: "added",
+            trigger, target, html: node.outerHTML,
+          });
+          if (scope.shadowRoots) observeShadowRoots(node);
+        }
+        for (const node of mutation.removedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
+          const trigger = inferTrigger(mutation.target);
+          const target = describeTarget(node);
+          const summary = `${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${target}`;
+          logEntry(summary, node.outerHTML, {
+            timestamp: Date.now(), elapsed: elapsed(), type: "removed",
+            trigger, target, html: node.outerHTML,
+          });
+        }
+      } else if (mutation.type === "attributes") {
+        const el = mutation.target;
+        if (!matchesFilter(el)) continue;
+        const trigger = inferTrigger(el);
+        const attr = mutation.attributeName;
+        const oldVal = mutation.oldValue;
+        const newVal = el.getAttribute(attr);
+        const target = describeTarget(el);
+        const summary = `${prefix} [+${elapsed()}s] [attr] [${formatTrigger(trigger)}] ${target} ${attr}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
+        logEntry(summary, null, {
+          timestamp: Date.now(), elapsed: elapsed(), type: "attr",
+          trigger, target, attribute: attr, oldValue: oldVal, newValue: newVal,
+        });
+      } else if (mutation.type === "characterData") {
+        const parentEl = mutation.target.parentElement || mutation.target;
+        if (!matchesFilter(parentEl)) continue;
+        const trigger = inferTrigger(parentEl);
+        const oldVal = mutation.oldValue;
+        const newVal = mutation.target.textContent;
+        const target = describeTarget(mutation.target.parentElement);
+        const summary = `${prefix} [+${elapsed()}s] [text] [${formatTrigger(trigger)}] ${target}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
+        logEntry(summary, null, {
+          timestamp: Date.now(), elapsed: elapsed(), type: "text",
+          trigger, target, oldValue: oldVal, newValue: newVal,
+        });
+      }
+    }
+  }
+
+  function observeShadowRoots(root) {
+    const elements = root.querySelectorAll ? [root, ...root.querySelectorAll("*")] : [root];
+    for (const el of elements) {
+      if (el.shadowRoot && !el.shadowRoot.__domHintObserved) {
+        el.shadowRoot.__domHintObserved = true;
+        const shadowObs = new MutationObserver(handleMutations);
+        shadowObs.observe(el.shadowRoot, getObserverOptions());
+        shadowObservers.push(shadowObs);
+        observeShadowRoots(el.shadowRoot);
+      }
+    }
+  }
+
+  function startObserver() {
+    observer = new MutationObserver(handleMutations);
+    const opts = getObserverOptions();
+    observer.observe(document.body, opts);
+
+    if (scope.head) {
+      observer.observe(document.head, opts);
+    }
+
+    if (scope.shadowRoots) {
+      observeShadowRoots(document.body);
+    }
   }
 
   function stopObserver() {
@@ -218,6 +250,10 @@
       observer.disconnect();
       observer = null;
     }
+    for (const obs of shadowObservers) {
+      obs.disconnect();
+    }
+    shadowObservers = [];
   }
 
   function checkModifiers(e) {

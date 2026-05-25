@@ -33,6 +33,7 @@ async function init() {
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    scope: { head: false, shadowRoots: false },
   });
   prefixInput.value = settings.prefix;
   $("#mod-ctrl").checked = settings.hotkeys.ctrl;
@@ -46,6 +47,8 @@ async function init() {
   $("#opt-maxhtml").value = settings.output.maxHtmlLength;
   $("#opt-selector").value = settings.output.selectorFilter;
   $("#opt-record").checked = settings.output.recordLog;
+  $("#scope-head").checked = settings.scope.head;
+  $("#scope-shadow").checked = settings.scope.shadowRoots;
   updateLogSection(settings.output.recordLog, injected);
 }
 
@@ -128,6 +131,10 @@ function saveSettings() {
       maxHtmlLength: parseInt($("#opt-maxhtml").value, 10) || 200,
       selectorFilter: $("#opt-selector").value.trim(),
       recordLog,
+    },
+    scope: {
+      head: $("#scope-head").checked,
+      shadowRoots: $("#scope-shadow").checked,
     },
   });
   updateLogSection(recordLog, statusEl.classList.contains("injected"));
