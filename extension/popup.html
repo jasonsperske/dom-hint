@@ -47,6 +47,16 @@
     <label>Selector filter
       <input id="opt-selector" type="text" placeholder="e.g. .my-component, #app" spellcheck="false">
     </label>
+    <label><input type="checkbox" id="opt-record"> Record session log</label>
+  </fieldset>
+
+  <fieldset id="log-section" class="hidden">
+    <legend>Session log</legend>
+    <div class="log-controls">
+      <span id="log-count">0 entries</span>
+      <button id="log-export" class="btn small">Export JSON</button>
+      <button id="log-clear" class="btn small">Clear</button>
+    </div>
   </fieldset>
 
   <a id="options-link" href="#">Edit auto-inject domains</a>

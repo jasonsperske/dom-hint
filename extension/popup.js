@@ -32,7 +32,7 @@ async function init() {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
-    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
   });
   prefixInput.value = settings.prefix;
   $("#mod-ctrl").checked = settings.hotkeys.ctrl;
@@ -45,6 +45,8 @@ async function init() {
   $("#opt-grouped").checked = settings.output.grouped;
   $("#opt-maxhtml").value = settings.output.maxHtmlLength;
   $("#opt-selector").value = settings.output.selectorFilter;
+  $("#opt-record").checked = settings.output.recordLog;
+  updateLogSection(settings.output.recordLog, injected);
 }
 
 function updateStatus(injected) {
@@ -107,6 +109,7 @@ async function addAutoInject(type) {
 }
 
 function saveSettings() {
+  const recordLog = $("#opt-record").checked;
   chrome.storage.sync.set({
     prefix: prefixInput.value || "dom-hint:",
     hotkeys: {
@@ -124,9 +127,57 @@ function saveSettings() {
       grouped: $("#opt-grouped").checked,
       maxHtmlLength: parseInt($("#opt-maxhtml").value, 10) || 200,
       selectorFilter: $("#opt-selector").value.trim(),
+      recordLog,
     },
   });
+  updateLogSection(recordLog, statusEl.classList.contains("injected"));
 }
+
+function updateLogSection(recording, injected) {
+  const section = $("#log-section");
+  if (recording && injected) {
+    section.classList.remove("hidden");
+    refreshLogCount();
+  } else {
+    section.classList.add("hidden");
+  }
+}
+
+async function refreshLogCount() {
+  if (!currentTab) return;
+  try {
+    const response = await chrome.tabs.sendMessage(currentTab.id, { action: "getLogCount" });
+    $("#log-count").textContent = `${response.count} ${response.count === 1 ? "entry" : "entries"}`;
+  } catch {
+    $("#log-count").textContent = "0 entries";
+  }
+}
+
+$("#log-export").addEventListener("click", async () => {
+  if (!currentTab) return;
+  try {
+    const response = await chrome.tabs.sendMessage(currentTab.id, { action: "getLog" });
+    const blob = new Blob([JSON.stringify(response.log, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dom-hints-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    // content script not available
+  }
+});
+
+$("#log-clear").addEventListener("click", async () => {
+  if (!currentTab) return;
+  try {
+    await chrome.tabs.sendMessage(currentTab.id, { action: "clearLog" });
+    refreshLogCount();
+  } catch {
+    // content script not available
+  }
+});
 
 prefixInput.addEventListener("input", saveSettings);
 $("#opt-selector").addEventListener("input", saveSettings);

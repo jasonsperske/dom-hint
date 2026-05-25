@@ -21,11 +21,13 @@ function createEnv(storageOverrides = {}) {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
-    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     ...storageOverrides,
   };
 
   let changeListeners = [];
+
+  let messageListeners = [];
 
   window.chrome = {
     storage: {
@@ -41,6 +43,13 @@ function createEnv(storageOverrides = {}) {
       onChanged: {
         addListener(fn) {
           changeListeners.push(fn);
+        },
+      },
+    },
+    runtime: {
+      onMessage: {
+        addListener(fn) {
+          messageListeners.push(fn);
         },
       },
     },
@@ -67,7 +76,13 @@ function createEnv(storageOverrides = {}) {
     currentGroup = null;
   };
 
-  return { dom, window, logs, groups, changeListeners, triggerStorageChange: (changes) => {
+  function sendMessage(msg) {
+    return new Promise((resolve) => {
+      messageListeners.forEach((fn) => fn(msg, {}, resolve));
+    });
+  }
+
+  return { dom, window, logs, groups, changeListeners, messageListeners, sendMessage, triggerStorageChange: (changes) => {
     changeListeners.forEach((fn) => fn(changes));
   }};
 }
@@ -162,7 +177,7 @@ describe("hotkey activation", () => {
 describe("childList mutations (element inserts & deletes)", () => {
   test("logs added elements", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -349,7 +364,7 @@ describe("log prefix", () => {
 describe("trigger inference", () => {
   test("attributes click trigger to synchronous mutations", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -485,7 +500,7 @@ describe("combined mutation types", () => {
 describe("grouped output", () => {
   test("uses groupCollapsed when grouped is enabled", async () => {
     const { window, logs, groups } = createEnv({
-      output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
+      output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -506,7 +521,7 @@ describe("grouped output", () => {
 
   test("uses flat log when grouped is disabled", async () => {
     const { window, logs, groups } = createEnv({
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -528,7 +543,7 @@ describe("grouped output", () => {
 describe("max HTML length", () => {
   test("truncates long HTML when grouped is disabled", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 30, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 30, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -549,7 +564,7 @@ describe("max HTML length", () => {
 
   test("does not truncate short HTML", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -570,7 +585,7 @@ describe("max HTML length", () => {
 
   test("shows full HTML inside group when grouped is enabled", async () => {
     const { window, groups } = createEnv({
-      output: { grouped: true, maxHtmlLength: 10, selectorFilter: "" },
+      output: { grouped: true, maxHtmlLength: 10, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -592,7 +607,7 @@ describe("max HTML length", () => {
 describe("selector filter", () => {
   test("only logs mutations matching the selector", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "#target" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "#target", recordLog: false },
     });
     await injectScript(window);
 
@@ -624,7 +639,7 @@ describe("selector filter", () => {
 
   test("logs all mutations when selector is empty", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     });
     await injectScript(window);
 
@@ -642,7 +657,7 @@ describe("selector filter", () => {
 
   test("treats invalid selector as no filter", async () => {
     const { window, logs } = createEnv({
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "[[[invalid" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "[[[invalid", recordLog: false },
     });
     await injectScript(window);
 
@@ -661,7 +676,7 @@ describe("selector filter", () => {
   test("filters attribute mutations by selector", async () => {
     const { window, logs } = createEnv({
       mutationTypes: { childList: false, attributes: true, characterData: false },
-      output: { grouped: false, maxHtmlLength: 200, selectorFilter: ".watched" },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: ".watched", recordLog: false },
     });
     await injectScript(window);
 
@@ -684,5 +699,162 @@ describe("selector filter", () => {
     await new Promise((r) => setTimeout(r, 10));
     assert.ok(logs.some((l) => l.includes("data-x")), "Should log attribute on .watched");
     assert.ok(!logs.some((l) => l.includes("data-y")), "Should not log attribute on .ignored");
+  });
+});
+
+describe("session log", () => {
+  test("does not record when recordLog is disabled", async () => {
+    const { window, sendMessage } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const el = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLog" });
+    assert.strictEqual(response.log.length, 0, "Should not record entries");
+  });
+
+  test("records entries when recordLog is enabled", async () => {
+    const { window, sendMessage } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const el = window.document.createElement("div");
+    el.id = "recorded";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLog" });
+    assert.ok(response.log.length > 0, "Should have recorded entries");
+    const entry = response.log.find((e) => e.target === "div#recorded");
+    assert.ok(entry, "Should have an entry for the added element");
+    assert.strictEqual(entry.type, "added");
+    assert.ok(entry.timestamp > 0);
+    assert.ok(entry.html.includes("recorded"));
+  });
+
+  test("records attribute mutations", async () => {
+    const { window, sendMessage } = createEnv({
+      mutationTypes: { childList: false, attributes: true, characterData: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    const el = window.document.getElementById("root");
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    el.setAttribute("data-test", "value");
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLog" });
+    const entry = response.log.find((e) => e.type === "attr");
+    assert.ok(entry, "Should record attribute mutation");
+    assert.strictEqual(entry.attribute, "data-test");
+    assert.strictEqual(entry.newValue, "value");
+  });
+
+  test("records text mutations", async () => {
+    const { window, sendMessage } = createEnv({
+      mutationTypes: { childList: false, attributes: false, characterData: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    const el = window.document.getElementById("root");
+    el.textContent = "original";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    el.firstChild.textContent = "changed";
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLog" });
+    const entry = response.log.find((e) => e.type === "text");
+    assert.ok(entry, "Should record text mutation");
+    assert.strictEqual(entry.oldValue, "original");
+    assert.strictEqual(entry.newValue, "changed");
+  });
+
+  test("clearLog empties the buffer", async () => {
+    const { window, sendMessage } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const el = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+
+    let response = await sendMessage({ action: "getLogCount" });
+    assert.ok(response.count > 0, "Should have entries before clear");
+
+    await sendMessage({ action: "clearLog" });
+
+    response = await sendMessage({ action: "getLog" });
+    assert.strictEqual(response.log.length, 0, "Should be empty after clear");
+  });
+
+  test("getLogCount returns entry count", async () => {
+    const { window, sendMessage } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const el1 = window.document.createElement("div");
+    const el2 = window.document.createElement("span");
+    window.document.getElementById("root").appendChild(el1);
+    window.document.getElementById("root").appendChild(el2);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLogCount" });
+    assert.strictEqual(response.count, 2);
+  });
+
+  test("log entries include trigger information", async () => {
+    const { window, sendMessage } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const btn = window.document.createElement("button");
+    btn.id = "trigger-test";
+    window.document.getElementById("root").appendChild(btn);
+    await new Promise((r) => setTimeout(r, 10));
+
+    btn.addEventListener("click", () => {
+      const span = window.document.createElement("span");
+      window.document.getElementById("root").appendChild(span);
+    });
+
+    simulateClick(window, btn, {});
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await sendMessage({ action: "getLog" });
+    const clickEntry = response.log.find((e) => e.target === "span");
+    assert.ok(clickEntry, "Should have entry for span added by click");
+    assert.ok(clickEntry.trigger, "Entry should have trigger info");
+    assert.ok(clickEntry.trigger.type, "Trigger should have a type");
   });
 });
