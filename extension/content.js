@@ -5,12 +5,14 @@
   const defaults = {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    mutationTypes: { childList: true, attributes: false, characterData: false },
   };
-  let { prefix, hotkeys } = await chrome.storage.sync.get(defaults);
+  let { prefix, hotkeys, mutationTypes } = await chrome.storage.sync.get(defaults);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.prefix) prefix = changes.prefix.newValue;
     if (changes.hotkeys) hotkeys = changes.hotkeys.newValue;
+    if (changes.mutationTypes) mutationTypes = changes.mutationTypes.newValue;
   });
 
   const SYNC_THRESHOLD_MS = 80;
@@ -101,19 +103,47 @@
   function startObserver() {
     observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (mutation.type === "childList") {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            const trigger = inferTrigger(mutation.target);
+            console.log(`${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${node.outerHTML}`);
+          }
+          for (const node of mutation.removedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            const trigger = inferTrigger(mutation.target);
+            console.log(`${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${node.outerHTML}`);
+          }
+        } else if (mutation.type === "attributes") {
           const trigger = inferTrigger(mutation.target);
-          console.log(`${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${node.outerHTML}`);
-        }
-        for (const node of mutation.removedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          const trigger = inferTrigger(mutation.target);
-          console.log(`${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${node.outerHTML}`);
+          const el = mutation.target;
+          const attr = mutation.attributeName;
+          const oldVal = mutation.oldValue;
+          const newVal = el.getAttribute(attr);
+          console.log(`${prefix} [+${elapsed()}s] [attr] [${formatTrigger(trigger)}] ${describeTarget(el)} ${attr}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`);
+        } else if (mutation.type === "characterData") {
+          const trigger = inferTrigger(mutation.target.parentElement || mutation.target);
+          const oldVal = mutation.oldValue;
+          const newVal = mutation.target.textContent;
+          const parent = describeTarget(mutation.target.parentElement);
+          console.log(`${prefix} [+${elapsed()}s] [text] [${formatTrigger(trigger)}] ${parent}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`);
         }
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    const observerOptions = { subtree: true };
+    if (mutationTypes.childList) observerOptions.childList = true;
+    if (mutationTypes.attributes) {
+      observerOptions.attributes = true;
+      observerOptions.attributeOldValue = true;
+    }
+    if (mutationTypes.characterData) {
+      observerOptions.characterData = true;
+      observerOptions.characterDataOldValue = true;
+    }
+    if (!observerOptions.childList && !observerOptions.attributes && !observerOptions.characterData) {
+      observerOptions.childList = true;
+    }
+    observer.observe(document.body, observerOptions);
   }
 
   function stopObserver() {

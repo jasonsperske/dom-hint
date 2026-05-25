@@ -23,6 +23,13 @@
     <span class="tooltip-target" data-tip="Hello from tooltip C">Hover C</span>
   </div>
 
+  <h3>Attribute &amp; text mutations</h3>
+  <div>
+    <button id="toggle-class-btn">Toggle class on box</button>
+    <button id="change-text-btn">Change text content</button>
+    <span id="demo-box" class="tooltip-target">Demo box</span>
+  </div>
+
   <h3>List</h3>
   <div>
     <button id="add-btn">Add item</button>
@@ -70,6 +77,16 @@
         li.style.color = "darkred";
         document.getElementById("list").appendChild(li);
       }, 1000);
+    });
+
+    document.getElementById("toggle-class-btn").addEventListener("click", () => {
+      document.getElementById("demo-box").classList.toggle("active");
+    });
+
+    let textCount = 0;
+    document.getElementById("change-text-btn").addEventListener("click", () => {
+      textCount++;
+      document.getElementById("demo-box").textContent = `Updated ${textCount}`;
     });
   </script>
 

@@ -31,12 +31,16 @@ async function init() {
   const settings = await chrome.storage.sync.get({
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    mutationTypes: { childList: true, attributes: false, characterData: false },
   });
   prefixInput.value = settings.prefix;
   $("#mod-ctrl").checked = settings.hotkeys.ctrl;
   $("#mod-alt").checked = settings.hotkeys.alt;
   $("#mod-shift").checked = settings.hotkeys.shift;
   $("#mod-meta").checked = settings.hotkeys.meta;
+  $("#mut-childlist").checked = settings.mutationTypes.childList;
+  $("#mut-attributes").checked = settings.mutationTypes.attributes;
+  $("#mut-characterdata").checked = settings.mutationTypes.characterData;
 }
 
 function updateStatus(injected) {
@@ -106,6 +110,11 @@ function saveSettings() {
       alt: $("#mod-alt").checked,
       shift: $("#mod-shift").checked,
       meta: $("#mod-meta").checked,
+    },
+    mutationTypes: {
+      childList: $("#mut-childlist").checked,
+      attributes: $("#mut-attributes").checked,
+      characterData: $("#mut-characterdata").checked,
     },
   });
 }

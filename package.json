@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "test": "node --test tests/",
     "changeset": "bash scripts/changeset.sh"
+  },
+  "devDependencies": {
+    "jsdom": "^20.0.3"
   }
 }
