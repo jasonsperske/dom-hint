@@ -5,15 +5,17 @@
   const defaults = {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     scope: { head: false, shadowRoots: false },
   };
-  let { prefix, hotkeys, mutationTypes, output, scope } = await chrome.storage.sync.get(defaults);
+  let { prefix, hotkeys, activation, mutationTypes, output, scope } = await chrome.storage.sync.get(defaults);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.prefix) prefix = changes.prefix.newValue;
     if (changes.hotkeys) hotkeys = changes.hotkeys.newValue;
+    if (changes.activation) activation = changes.activation.newValue;
     if (changes.mutationTypes) mutationTypes = changes.mutationTypes.newValue;
     if (changes.output) output = changes.output.newValue;
     if (changes.scope) scope = changes.scope.newValue;
@@ -256,6 +258,50 @@
     shadowObservers = [];
   }
 
+  let indicator = null;
+
+  function showIndicator() {
+    if (!activation.showIndicator) return;
+    if (indicator) return;
+    indicator = document.createElement("div");
+    indicator.setAttribute("style",
+      "position:fixed;top:6px;right:6px;z-index:2147483647;padding:4px 8px;" +
+      "background:rgba(220,38,38,0.9);color:#fff;font:11px/1 system-ui,sans-serif;" +
+      "border-radius:3px;pointer-events:none;user-select:none;"
+    );
+    indicator.textContent = "DOM Hints: recording";
+    document.documentElement.appendChild(indicator);
+  }
+
+  function hideIndicator() {
+    if (indicator) {
+      indicator.remove();
+      indicator = null;
+    }
+  }
+
+  function startWatching() {
+    if (watching) return;
+    watching = true;
+    startTime = Date.now();
+    recentEvents = [];
+    startListeners();
+    startObserver();
+    showIndicator();
+    console.log(`${prefix} started watching for Document mutations`);
+  }
+
+  function stopWatching() {
+    if (!watching) return;
+    stopObserver();
+    stopListeners();
+    hideIndicator();
+    watching = false;
+    const seconds = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`${prefix} stopped listening (watched for ${seconds}s)`);
+    startTime = null;
+  }
+
   function checkModifiers(e) {
     const anyRequired = hotkeys.ctrl || hotkeys.alt || hotkeys.shift || hotkeys.meta;
     if (!anyRequired) return false;
@@ -275,24 +321,25 @@
   }
 
   document.addEventListener("click", (e) => {
-    if (checkModifiers(e) && !watching) {
-      watching = true;
-      startTime = Date.now();
-      recentEvents = [];
-      startListeners();
-      startObserver();
-      console.log(`${prefix} started watching for Document mutations`);
+    if (!checkModifiers(e)) return;
+    if (activation.toggleMode) {
+      if (watching) {
+        stopWatching();
+      } else {
+        startWatching();
+      }
+    } else if (!watching) {
+      startWatching();
     }
   });
 
   document.addEventListener("keyup", (e) => {
-    if (watching && modifiersReleased(e)) {
-      stopObserver();
-      stopListeners();
-      watching = false;
-      const seconds = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`${prefix} stopped listening (watched for ${seconds}s)`);
-      startTime = null;
+    if (!activation.toggleMode && watching && modifiersReleased(e)) {
+      stopWatching();
     }
   });
+
+  if (activation.autoStart) {
+    startWatching();
+  }
 })();

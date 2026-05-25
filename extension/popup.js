@@ -31,6 +31,7 @@ async function init() {
   const settings = await chrome.storage.sync.get({
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     scope: { head: false, shadowRoots: false },
@@ -40,6 +41,9 @@ async function init() {
   $("#mod-alt").checked = settings.hotkeys.alt;
   $("#mod-shift").checked = settings.hotkeys.shift;
   $("#mod-meta").checked = settings.hotkeys.meta;
+  $("#act-toggle").checked = settings.activation.toggleMode;
+  $("#act-indicator").checked = settings.activation.showIndicator;
+  $("#act-autostart").checked = settings.activation.autoStart;
   $("#mut-childlist").checked = settings.mutationTypes.childList;
   $("#mut-attributes").checked = settings.mutationTypes.attributes;
   $("#mut-characterdata").checked = settings.mutationTypes.characterData;
@@ -120,6 +124,11 @@ function saveSettings() {
       alt: $("#mod-alt").checked,
       shift: $("#mod-shift").checked,
       meta: $("#mod-meta").checked,
+    },
+    activation: {
+      toggleMode: $("#act-toggle").checked,
+      showIndicator: $("#act-indicator").checked,
+      autoStart: $("#act-autostart").checked,
     },
     mutationTypes: {
       childList: $("#mut-childlist").checked,

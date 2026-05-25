@@ -20,6 +20,7 @@ function createEnv(storageOverrides = {}) {
   const storage = {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
     scope: { head: false, shadowRoots: false },
@@ -1020,5 +1021,137 @@ describe("shadow DOM observation", () => {
 
     await new Promise((r) => setTimeout(r, 10));
     assert.ok(!logs.some((l) => l.includes("after-stop")), "Should not log after deactivation");
+  });
+});
+
+describe("toggle mode", () => {
+  test("modifier+click toggles on, second modifier+click toggles off", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    // First click starts watching
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should start on first click");
+    logs.length = 0;
+
+    // Mutation is observed
+    const el = window.document.createElement("div");
+    el.className = "toggle-test";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("toggle-test")), "Should observe while active");
+    logs.length = 0;
+
+    // Second click stops watching
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop on second click");
+  });
+
+  test("keyup does not stop watching in toggle mode", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    logs.length = 0;
+
+    // Release keys — should NOT stop in toggle mode
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    assert.ok(!logs.some((l) => l.includes("stopped")), "Should not stop on keyup in toggle mode");
+  });
+});
+
+describe("on-page indicator", () => {
+  test("shows indicator when watching starts", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: true, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.ok(indicator, "Should have an indicator element");
+    assert.ok(indicator.textContent.includes("DOM Hints"), "Indicator should identify the extension");
+  });
+
+  test("hides indicator when watching stops", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: true, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.strictEqual(indicator, null, "Indicator should be removed");
+  });
+
+  test("no indicator when showIndicator is disabled", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.strictEqual(indicator, null, "Should not show indicator when disabled");
+  });
+});
+
+describe("auto-start", () => {
+  test("starts watching immediately on injection when autoStart is enabled", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should auto-start");
+
+    // Mutations should be logged without any hotkey activation
+    const el = window.document.createElement("div");
+    el.className = "auto-observed";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("auto-observed")), "Should observe mutations after auto-start");
+  });
+
+  test("does not auto-start when autoStart is disabled", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    assert.ok(!logs.some((l) => l.includes("started watching")), "Should not auto-start");
+  });
+
+  test("auto-start can be stopped with toggle mode", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should auto-start");
+    logs.length = 0;
+
+    // Toggle off
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop on toggle click");
+    logs.length = 0;
+
+    // Mutations should not be logged
+    const el = window.document.createElement("div");
+    el.className = "after-toggle-off";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("after-toggle-off")), "Should not observe after toggle off");
   });
 });
