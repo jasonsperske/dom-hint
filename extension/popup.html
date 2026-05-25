@@ -24,11 +24,17 @@
   </label>
 
   <fieldset>
-    <legend>Activation modifiers + click</legend>
-    <label><input type="checkbox" id="mod-ctrl" checked> Ctrl</label>
-    <label><input type="checkbox" id="mod-alt" checked> Alt</label>
-    <label><input type="checkbox" id="mod-shift"> Shift</label>
-    <label><input type="checkbox" id="mod-meta"> Meta</label>
+    <legend>Activation</legend>
+    <label class="sub-label">Modifiers + click</label>
+    <div class="inline-group">
+      <label><input type="checkbox" id="mod-ctrl" checked> Ctrl</label>
+      <label><input type="checkbox" id="mod-alt" checked> Alt</label>
+      <label><input type="checkbox" id="mod-shift"> Shift</label>
+      <label><input type="checkbox" id="mod-meta"> Meta</label>
+    </div>
+    <label><input type="checkbox" id="act-toggle"> Toggle mode (click on, click off)</label>
+    <label><input type="checkbox" id="act-indicator" checked> Show on-page indicator</label>
+    <label><input type="checkbox" id="act-autostart"> Start on page load</label>
   </fieldset>
 
   <fieldset>
@@ -42,6 +48,7 @@
     <legend>Observe scope</legend>
     <label><input type="checkbox" id="scope-head"> Include &lt;head&gt;</label>
     <label><input type="checkbox" id="scope-shadow"> Shadow DOM roots</label>
+    <label><input type="checkbox" id="scope-iframes"> Include iframes</label>
   </fieldset>
 
   <fieldset>
@@ -52,6 +59,12 @@
     </label>
     <label>Selector filter
       <input id="opt-selector" type="text" placeholder="e.g. .my-component, #app" spellcheck="false">
+    </label>
+    <label>Ignore list
+      <input id="opt-ignore" type="text" placeholder="e.g. .cursor-blink, .animation" spellcheck="false">
+    </label>
+    <label>Debounce (ms)
+      <input id="opt-debounce" type="number" min="0" max="5000" step="10" value="0">
     </label>
     <label><input type="checkbox" id="opt-record"> Record session log</label>
   </fieldset>

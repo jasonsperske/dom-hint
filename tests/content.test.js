@@ -20,15 +20,17 @@ function createEnv(storageOverrides = {}) {
   const storage = {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
+    activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
-    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
-    scope: { head: false, shadowRoots: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+              ignoreList: "", debounceMs: 0 },
+    scope: { head: false, shadowRoots: false, iframes: false },
     ...storageOverrides,
   };
 
   let changeListeners = [];
-
   let messageListeners = [];
+  const badgeMessages = [];
 
   window.chrome = {
     storage: {
@@ -52,6 +54,11 @@ function createEnv(storageOverrides = {}) {
         addListener(fn) {
           messageListeners.push(fn);
         },
+      },
+      sendMessage(msg) {
+        if (msg.action === "updateBadge") badgeMessages.push(msg);
+        if (msg.action === "clearBadge") badgeMessages.push(msg);
+        return Promise.resolve({ ok: true });
       },
     },
   };
@@ -83,7 +90,7 @@ function createEnv(storageOverrides = {}) {
     });
   }
 
-  return { dom, window, logs, groups, changeListeners, messageListeners, sendMessage, triggerStorageChange: (changes) => {
+  return { dom, window, logs, groups, badgeMessages, changeListeners, messageListeners, sendMessage, triggerStorageChange: (changes) => {
     changeListeners.forEach((fn) => fn(changes));
   }};
 }
@@ -1020,5 +1027,342 @@ describe("shadow DOM observation", () => {
 
     await new Promise((r) => setTimeout(r, 10));
     assert.ok(!logs.some((l) => l.includes("after-stop")), "Should not log after deactivation");
+  });
+});
+
+describe("toggle mode", () => {
+  test("modifier+click toggles on, second modifier+click toggles off", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    // First click starts watching
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should start on first click");
+    logs.length = 0;
+
+    // Mutation is observed
+    const el = window.document.createElement("div");
+    el.className = "toggle-test";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("toggle-test")), "Should observe while active");
+    logs.length = 0;
+
+    // Second click stops watching
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop on second click");
+  });
+
+  test("keyup does not stop watching in toggle mode", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    logs.length = 0;
+
+    // Release keys — should NOT stop in toggle mode
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    assert.ok(!logs.some((l) => l.includes("stopped")), "Should not stop on keyup in toggle mode");
+  });
+});
+
+describe("on-page indicator", () => {
+  test("shows indicator when watching starts", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: true, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.ok(indicator, "Should have an indicator element");
+    assert.ok(indicator.textContent.includes("DOM Hints"), "Indicator should identify the extension");
+  });
+
+  test("hides indicator when watching stops", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: true, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.strictEqual(indicator, null, "Indicator should be removed");
+  });
+
+  test("no indicator when showIndicator is disabled", async () => {
+    const { window } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+
+    const indicator = window.document.documentElement.querySelector("[style*='fixed']");
+    assert.strictEqual(indicator, null, "Should not show indicator when disabled");
+  });
+});
+
+describe("auto-start", () => {
+  test("starts watching immediately on injection when autoStart is enabled", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+    });
+    await injectScript(window);
+
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should auto-start");
+
+    // Mutations should be logged without any hotkey activation
+    const el = window.document.createElement("div");
+    el.className = "auto-observed";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("auto-observed")), "Should observe mutations after auto-start");
+  });
+
+  test("does not auto-start when autoStart is disabled", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: false },
+    });
+    await injectScript(window);
+
+    assert.ok(!logs.some((l) => l.includes("started watching")), "Should not auto-start");
+  });
+
+  test("auto-start can be stopped with toggle mode", async () => {
+    const { window, logs } = createEnv({
+      activation: { toggleMode: true, showIndicator: false, autoStart: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should auto-start");
+    logs.length = 0;
+
+    // Toggle off
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop on toggle click");
+    logs.length = 0;
+
+    // Mutations should not be logged
+    const el = window.document.createElement("div");
+    el.className = "after-toggle-off";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("after-toggle-off")), "Should not observe after toggle off");
+  });
+});
+
+describe("ignore list", () => {
+  test("suppresses mutations on elements matching ignore list", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: ".noisy", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const noisy = window.document.createElement("div");
+    noisy.className = "noisy";
+    window.document.getElementById("root").appendChild(noisy);
+
+    const wanted = window.document.createElement("div");
+    wanted.className = "wanted";
+    window.document.getElementById("root").appendChild(wanted);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("noisy")), "Should not log ignored element");
+    assert.ok(logs.some((l) => l.includes("wanted")), "Should log non-ignored element");
+  });
+
+  test("empty ignore list does not suppress anything", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.className = "anything";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("anything")), "Should log when no ignore list");
+  });
+
+  test("ignores attribute mutations on matching elements", async () => {
+    const { window, logs } = createEnv({
+      mutationTypes: { childList: false, attributes: true, characterData: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: ".ignored-attr", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    const root = window.document.getElementById("root");
+    const ignored = window.document.createElement("div");
+    ignored.className = "ignored-attr";
+    root.appendChild(ignored);
+
+    const tracked = window.document.createElement("div");
+    tracked.className = "tracked-attr";
+    root.appendChild(tracked);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    ignored.setAttribute("data-x", "1");
+    tracked.setAttribute("data-y", "2");
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("data-x")), "Should not log attribute on ignored element");
+    assert.ok(logs.some((l) => l.includes("data-y")), "Should log attribute on tracked element");
+  });
+});
+
+describe("debounce", () => {
+  test("batches rapid mutations into a single group", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 50 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    // Add 5 elements rapidly
+    for (let i = 0; i < 5; i++) {
+      const el = window.document.createElement("div");
+      el.className = `batch-${i}`;
+      window.document.getElementById("root").appendChild(el);
+    }
+
+    // Before debounce fires, nothing should be logged
+    assert.strictEqual(logs.length, 0, "Should not log immediately with debounce");
+
+    // Wait for debounce to fire
+    await new Promise((r) => setTimeout(r, 80));
+    assert.ok(logs.some((l) => l.includes("[batch]") && l.includes("5 mutations")), "Should batch into single entry");
+  });
+
+  test("does not debounce when debounceMs is 0", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.className = "immediate";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("immediate")), "Should log immediately without debounce");
+  });
+
+  test("flushes debounce buffer on stop", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 500 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.className = "flushed";
+    window.document.getElementById("root").appendChild(el);
+
+    // Let MutationObserver fire before stopping
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Stop before debounce would fire (debounce is 500ms, only 10ms elapsed)
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.ok(logs.some((l) => l.includes("flushed")), "Should flush pending mutations on stop");
+  });
+});
+
+describe("badge messages", () => {
+  test("sends updateBadge message on mutations", async () => {
+    const { window, badgeMessages } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    badgeMessages.length = 0;
+
+    const el = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const updates = badgeMessages.filter((m) => m.action === "updateBadge");
+    assert.ok(updates.length > 0, "Should send badge update");
+    assert.ok(updates[0].count > 0, "Badge count should be positive");
+  });
+
+  test("sends clearBadge on stop", async () => {
+    const { window, badgeMessages } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    badgeMessages.length = 0;
+
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const clears = badgeMessages.filter((m) => m.action === "clearBadge");
+    assert.ok(clears.length > 0, "Should send clearBadge on stop");
+  });
+});
+
+describe("toggle via message", () => {
+  test("toggleObserver message starts and stops watching", async () => {
+    const { window, logs, sendMessage } = createEnv({
+      activation: { toggleMode: false, showIndicator: false, autoStart: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    await sendMessage({ action: "toggleObserver" });
+    assert.ok(logs.some((l) => l.includes("started watching")), "Should start via message");
+    logs.length = 0;
+
+    await sendMessage({ action: "toggleObserver" });
+    assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop via message");
   });
 });

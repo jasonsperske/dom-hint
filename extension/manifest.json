@@ -17,5 +17,14 @@
   "background": {
     "service_worker": "background.js"
   },
+  "commands": {
+    "toggle-observer": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+M",
+        "mac": "Command+Shift+M"
+      },
+      "description": "Toggle DOM mutation observer"
+    }
+  },
   "options_page": "options.html"
 }
