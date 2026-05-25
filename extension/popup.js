@@ -33,8 +33,9 @@ async function init() {
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
-    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
-    scope: { head: false, shadowRoots: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+              ignoreList: "", debounceMs: 0 },
+    scope: { head: false, shadowRoots: false, iframes: false },
   });
   prefixInput.value = settings.prefix;
   $("#mod-ctrl").checked = settings.hotkeys.ctrl;
@@ -50,9 +51,12 @@ async function init() {
   $("#opt-grouped").checked = settings.output.grouped;
   $("#opt-maxhtml").value = settings.output.maxHtmlLength;
   $("#opt-selector").value = settings.output.selectorFilter;
+  $("#opt-ignore").value = settings.output.ignoreList;
+  $("#opt-debounce").value = settings.output.debounceMs;
   $("#opt-record").checked = settings.output.recordLog;
   $("#scope-head").checked = settings.scope.head;
   $("#scope-shadow").checked = settings.scope.shadowRoots;
+  $("#scope-iframes").checked = settings.scope.iframes;
   updateLogSection(settings.output.recordLog, injected);
 }
 
@@ -72,7 +76,8 @@ function updateStatus(injected) {
 
 injectBtn.addEventListener("click", async () => {
   if (!currentTab) return;
-  await chrome.runtime.sendMessage({ action: "inject", tabId: currentTab.id });
+  const includeFrames = $("#scope-iframes").checked;
+  await chrome.runtime.sendMessage({ action: "inject", tabId: currentTab.id, includeFrames });
   updateStatus(true);
 });
 
@@ -139,11 +144,14 @@ function saveSettings() {
       grouped: $("#opt-grouped").checked,
       maxHtmlLength: parseInt($("#opt-maxhtml").value, 10) || 200,
       selectorFilter: $("#opt-selector").value.trim(),
+      ignoreList: $("#opt-ignore").value.trim(),
+      debounceMs: parseInt($("#opt-debounce").value, 10) || 0,
       recordLog,
     },
     scope: {
       head: $("#scope-head").checked,
       shadowRoots: $("#scope-shadow").checked,
+      iframes: $("#scope-iframes").checked,
     },
   });
   updateLogSection(recordLog, statusEl.classList.contains("injected"));
@@ -197,7 +205,9 @@ $("#log-clear").addEventListener("click", async () => {
 
 prefixInput.addEventListener("input", saveSettings);
 $("#opt-selector").addEventListener("input", saveSettings);
+$("#opt-ignore").addEventListener("input", saveSettings);
 $("#opt-maxhtml").addEventListener("change", saveSettings);
+$("#opt-debounce").addEventListener("change", saveSettings);
 document.querySelectorAll("fieldset input[type='checkbox']").forEach((cb) => {
   cb.addEventListener("change", saveSettings);
 });

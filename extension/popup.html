@@ -48,6 +48,7 @@
     <legend>Observe scope</legend>
     <label><input type="checkbox" id="scope-head"> Include &lt;head&gt;</label>
     <label><input type="checkbox" id="scope-shadow"> Shadow DOM roots</label>
+    <label><input type="checkbox" id="scope-iframes"> Include iframes</label>
   </fieldset>
 
   <fieldset>
@@ -58,6 +59,12 @@
     </label>
     <label>Selector filter
       <input id="opt-selector" type="text" placeholder="e.g. .my-component, #app" spellcheck="false">
+    </label>
+    <label>Ignore list
+      <input id="opt-ignore" type="text" placeholder="e.g. .cursor-blink, .animation" spellcheck="false">
+    </label>
+    <label>Debounce (ms)
+      <input id="opt-debounce" type="number" min="0" max="5000" step="10" value="0">
     </label>
     <label><input type="checkbox" id="opt-record"> Record session log</label>
   </fieldset>

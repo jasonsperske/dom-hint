@@ -7,8 +7,9 @@
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
-    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
-    scope: { head: false, shadowRoots: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+              ignoreList: "", debounceMs: 0 },
+    scope: { head: false, shadowRoots: false, iframes: false },
   };
   let { prefix, hotkeys, activation, mutationTypes, output, scope } = await chrome.storage.sync.get(defaults);
 
@@ -31,6 +32,9 @@
       sendResponse({ ok: true });
     } else if (msg.action === "getLogCount") {
       sendResponse({ count: sessionLog.length });
+    } else if (msg.action === "toggleObserver") {
+      if (watching) { stopWatching(); } else { startWatching(); }
+      sendResponse({ watching });
     }
   });
 
@@ -112,7 +116,45 @@
     }
   }
 
-  function logEntry(summary, detail, entry) {
+  function isIgnored(el) {
+    if (!output.ignoreList) return false;
+    try {
+      return el.matches(output.ignoreList);
+    } catch {
+      return false;
+    }
+  }
+
+  let mutationCount = 0;
+  let debounceBuffer = [];
+  let debounceTimer = null;
+
+  function flushDebounce() {
+    if (debounceBuffer.length === 0) return;
+    if (debounceBuffer.length === 1) {
+      emitEntry(debounceBuffer[0]);
+    } else {
+      const summary = `${prefix} [+${elapsed()}s] [batch] ${debounceBuffer.length} mutations`;
+      if (output.grouped) {
+        console.groupCollapsed(summary);
+        for (const item of debounceBuffer) {
+          console.log(item.summary);
+        }
+        console.groupEnd();
+      } else {
+        console.log(summary);
+      }
+      if (output.recordLog) {
+        for (const item of debounceBuffer) {
+          if (item.entry) sessionLog.push(item.entry);
+        }
+      }
+    }
+    debounceBuffer = [];
+    debounceTimer = null;
+  }
+
+  function emitEntry({ summary, detail, entry }) {
     if (output.grouped && detail) {
       console.groupCollapsed(summary);
       console.log(detail);
@@ -122,6 +164,21 @@
     }
     if (output.recordLog && entry) {
       sessionLog.push(entry);
+    }
+  }
+
+  function logEntry(summary, detail, entry) {
+    mutationCount++;
+    try {
+      chrome.runtime.sendMessage({ action: "updateBadge", count: mutationCount });
+    } catch {}
+    if (output.debounceMs > 0) {
+      debounceBuffer.push({ summary, detail, entry });
+      if (!debounceTimer) {
+        debounceTimer = setTimeout(flushDebounce, output.debounceMs);
+      }
+    } else {
+      emitEntry({ summary, detail, entry });
     }
   }
 
@@ -170,6 +227,7 @@
       if (mutation.type === "childList") {
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (isIgnored(node)) continue;
           if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
           const trigger = inferTrigger(mutation.target);
           const target = describeTarget(node);
@@ -182,6 +240,7 @@
         }
         for (const node of mutation.removedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (isIgnored(node)) continue;
           if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
           const trigger = inferTrigger(mutation.target);
           const target = describeTarget(node);
@@ -193,6 +252,7 @@
         }
       } else if (mutation.type === "attributes") {
         const el = mutation.target;
+        if (isIgnored(el)) continue;
         if (!matchesFilter(el)) continue;
         const trigger = inferTrigger(el);
         const attr = mutation.attributeName;
@@ -206,6 +266,7 @@
         });
       } else if (mutation.type === "characterData") {
         const parentEl = mutation.target.parentElement || mutation.target;
+        if (isIgnored(parentEl)) continue;
         if (!matchesFilter(parentEl)) continue;
         const trigger = inferTrigger(parentEl);
         const oldVal = mutation.oldValue;
@@ -284,6 +345,7 @@
     if (watching) return;
     watching = true;
     startTime = Date.now();
+    mutationCount = 0;
     recentEvents = [];
     startListeners();
     startObserver();
@@ -293,13 +355,15 @@
 
   function stopWatching() {
     if (!watching) return;
+    if (debounceTimer) { clearTimeout(debounceTimer); flushDebounce(); }
     stopObserver();
     stopListeners();
     hideIndicator();
     watching = false;
     const seconds = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`${prefix} stopped listening (watched for ${seconds}s)`);
+    console.log(`${prefix} stopped listening (watched for ${seconds}s, ${mutationCount} mutations)`);
     startTime = null;
+    try { chrome.runtime.sendMessage({ action: "clearBadge" }); } catch {}
   }
 
   function checkModifiers(e) {
