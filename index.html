@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dom-hints</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .tooltip-target { position: relative; display: inline-block; margin: 0 12px; padding: 6px 12px; background: #e0e0e0; border-radius: 4px; cursor: default; }
+    .tooltip { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 6px; padding: 4px 8px; background: #333; color: #fff; border-radius: 4px; font-size: 13px; white-space: nowrap; }
+    button { margin: 4px; padding: 6px 12px; }
+    ul { border: 1px solid #ccc; padding: 10px 10px 10px 30px; min-height: 40px; max-width: 300px; }
+    li { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <p>This page has its own MutationObserver (<code>page-observer:</code>). Use the DOM Hints extension to inject a second, independent observer and see both in the console without interference.</p>
+
+  <h3>Hover for tooltips</h3>
+  <div>
+    <span class="tooltip-target" data-tip="Hello from tooltip A">Hover A</span>
+    <span class="tooltip-target" data-tip="Hello from tooltip B">Hover B</span>
+    <span class="tooltip-target" data-tip="Hello from tooltip C">Hover C</span>
+  </div>
+
+  <h3>List</h3>
+  <div>
+    <button id="add-btn">Add item</button>
+    <button id="remove-btn">Remove last item</button>
+    <button id="delayed-btn">Delayed mutation (1s)</button>
+  </div>
+  <ul id="list">
+    <li>Item 1</li>
+  </ul>
+
+  <!-- Page logic — no dom-hint awareness -->
+  <script>
+    let itemCount = 1;
+
+    document.querySelectorAll(".tooltip-target").forEach((el) => {
+      el.addEventListener("mouseenter", () => {
+        const tip = document.createElement("span");
+        tip.className = "tooltip";
+        tip.textContent = el.dataset.tip;
+        el.appendChild(tip);
+      });
+      el.addEventListener("mouseleave", () => {
+        const tip = el.querySelector(".tooltip");
+        if (tip) tip.remove();
+      });
+    });
+
+    document.getElementById("add-btn").addEventListener("click", () => {
+      itemCount++;
+      const li = document.createElement("li");
+      li.textContent = `Item ${itemCount}`;
+      document.getElementById("list").appendChild(li);
+    });
+
+    document.getElementById("remove-btn").addEventListener("click", () => {
+      const list = document.getElementById("list");
+      if (list.lastElementChild) list.lastElementChild.remove();
+    });
+
+    document.getElementById("delayed-btn").addEventListener("click", () => {
+      setTimeout(() => {
+        itemCount++;
+        const li = document.createElement("li");
+        li.textContent = `Delayed Item ${itemCount}`;
+        li.style.color = "darkred";
+        document.getElementById("list").appendChild(li);
+      }, 1000);
+    });
+  </script>
+
+  <!-- Page's own MutationObserver — always active, independent of the extension -->
+  <script>
+    (function() {
+      const PREFIX = "page-observer:";
+
+      const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            console.log(`${PREFIX} [added] ${node.outerHTML}`);
+          }
+          for (const node of mutation.removedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            console.log(`${PREFIX} [removed] ${node.outerHTML}`);
+          }
+        }
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+      console.log(`${PREFIX} listening (always on)`);
+    })();
+  </script>
+</body>
+</html>

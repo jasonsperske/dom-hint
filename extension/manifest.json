@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "DOM Hints",
+  "version": "1.0",
+  "description": "Observe DOM mutations triggered by user interactions",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html"
+}
