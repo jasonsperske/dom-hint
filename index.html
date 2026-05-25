@@ -23,6 +23,26 @@
     <span class="tooltip-target" data-tip="Hello from tooltip C">Hover C</span>
   </div>
 
+  <h3>Attribute &amp; text mutations</h3>
+  <div>
+    <button id="toggle-class-btn">Toggle class on box</button>
+    <button id="change-text-btn">Change text content</button>
+    <span id="demo-box" class="tooltip-target">Demo box</span>
+  </div>
+
+  <h3>Shadow DOM</h3>
+  <div>
+    <button id="shadow-add-btn">Add to shadow root</button>
+    <button id="shadow-remove-btn">Remove from shadow root</button>
+    <div id="shadow-host"></div>
+  </div>
+
+  <h3>&lt;head&gt; mutations</h3>
+  <div>
+    <button id="head-style-btn">Inject &lt;style&gt; into head</button>
+    <button id="head-meta-btn">Add &lt;meta&gt; tag to head</button>
+  </div>
+
   <h3>List</h3>
   <div>
     <button id="add-btn">Add item</button>
@@ -70,6 +90,53 @@
         li.style.color = "darkred";
         document.getElementById("list").appendChild(li);
       }, 1000);
+    });
+
+    document.getElementById("toggle-class-btn").addEventListener("click", () => {
+      document.getElementById("demo-box").classList.toggle("active");
+    });
+
+    let textCount = 0;
+    document.getElementById("change-text-btn").addEventListener("click", () => {
+      textCount++;
+      document.getElementById("demo-box").textContent = `Updated ${textCount}`;
+    });
+
+    // Shadow DOM setup
+    const shadowHost = document.getElementById("shadow-host");
+    const shadow = shadowHost.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<style>span { color: purple; }</style><div id="shadow-container"><span>Shadow content</span></div>`;
+    let shadowCount = 0;
+
+    document.getElementById("shadow-add-btn").addEventListener("click", () => {
+      shadowCount++;
+      const el = document.createElement("p");
+      el.textContent = `Shadow item ${shadowCount}`;
+      shadow.getElementById("shadow-container").appendChild(el);
+    });
+
+    document.getElementById("shadow-remove-btn").addEventListener("click", () => {
+      const container = shadow.getElementById("shadow-container");
+      if (container.lastElementChild) container.lastElementChild.remove();
+    });
+
+    // <head> mutation buttons
+    let styleCount = 0;
+    document.getElementById("head-style-btn").addEventListener("click", () => {
+      styleCount++;
+      const style = document.createElement("style");
+      style.textContent = `/* injected style ${styleCount} */ body { border-top: 2px solid hsl(${styleCount * 60}, 70%, 50%); }`;
+      style.dataset.injected = styleCount;
+      document.head.appendChild(style);
+    });
+
+    let metaCount = 0;
+    document.getElementById("head-meta-btn").addEventListener("click", () => {
+      metaCount++;
+      const meta = document.createElement("meta");
+      meta.name = `x-test-${metaCount}`;
+      meta.content = `value-${metaCount}`;
+      document.head.appendChild(meta);
     });
   </script>
 

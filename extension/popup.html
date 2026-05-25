@@ -31,6 +31,40 @@
     <label><input type="checkbox" id="mod-meta"> Meta</label>
   </fieldset>
 
+  <fieldset>
+    <legend>Track mutations</legend>
+    <label><input type="checkbox" id="mut-childlist" checked> Element inserts &amp; deletes</label>
+    <label><input type="checkbox" id="mut-attributes"> Attribute changes</label>
+    <label><input type="checkbox" id="mut-characterdata"> Text changes</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Observe scope</legend>
+    <label><input type="checkbox" id="scope-head"> Include &lt;head&gt;</label>
+    <label><input type="checkbox" id="scope-shadow"> Shadow DOM roots</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Output</legend>
+    <label><input type="checkbox" id="opt-grouped" checked> Group details (collapsed)</label>
+    <label>Max HTML length
+      <input id="opt-maxhtml" type="number" min="0" max="10000" step="50" value="200">
+    </label>
+    <label>Selector filter
+      <input id="opt-selector" type="text" placeholder="e.g. .my-component, #app" spellcheck="false">
+    </label>
+    <label><input type="checkbox" id="opt-record"> Record session log</label>
+  </fieldset>
+
+  <fieldset id="log-section" class="hidden">
+    <legend>Session log</legend>
+    <div class="log-controls">
+      <span id="log-count">0 entries</span>
+      <button id="log-export" class="btn small">Export JSON</button>
+      <button id="log-clear" class="btn small">Clear</button>
+    </div>
+  </fieldset>
+
   <a id="options-link" href="#">Edit auto-inject domains</a>
 
   <script src="popup.js"></script>
