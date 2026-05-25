@@ -38,6 +38,17 @@
     <label><input type="checkbox" id="mut-characterdata"> Text changes</label>
   </fieldset>
 
+  <fieldset>
+    <legend>Output</legend>
+    <label><input type="checkbox" id="opt-grouped" checked> Group details (collapsed)</label>
+    <label>Max HTML length
+      <input id="opt-maxhtml" type="number" min="0" max="10000" step="50" value="200">
+    </label>
+    <label>Selector filter
+      <input id="opt-selector" type="text" placeholder="e.g. .my-component, #app" spellcheck="false">
+    </label>
+  </fieldset>
+
   <a id="options-link" href="#">Edit auto-inject domains</a>
 
   <script src="popup.js"></script>

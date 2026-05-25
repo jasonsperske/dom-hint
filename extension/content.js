@@ -6,13 +6,15 @@
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
   };
-  let { prefix, hotkeys, mutationTypes } = await chrome.storage.sync.get(defaults);
+  let { prefix, hotkeys, mutationTypes, output } = await chrome.storage.sync.get(defaults);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.prefix) prefix = changes.prefix.newValue;
     if (changes.hotkeys) hotkeys = changes.hotkeys.newValue;
     if (changes.mutationTypes) mutationTypes = changes.mutationTypes.newValue;
+    if (changes.output) output = changes.output.newValue;
   });
 
   const SYNC_THRESHOLD_MS = 80;
@@ -77,6 +79,31 @@
     return `${trigger.type} on ${trigger.target} ~${trigger.age}ms ago`;
   }
 
+  function truncateHtml(html) {
+    const max = output.maxHtmlLength;
+    if (max <= 0 || html.length <= max) return html;
+    return html.slice(0, max) + "…";
+  }
+
+  function matchesFilter(el) {
+    if (!output.selectorFilter) return true;
+    try {
+      return el.matches(output.selectorFilter) || el.closest(output.selectorFilter);
+    } catch {
+      return true;
+    }
+  }
+
+  function logEntry(summary, detail) {
+    if (output.grouped && detail) {
+      console.groupCollapsed(summary);
+      console.log(detail);
+      console.groupEnd();
+    } else {
+      console.log(detail ? `${summary} ${truncateHtml(detail)}` : summary);
+    }
+  }
+
   const TRACKED_EVENTS = [
     "click", "mousedown", "mouseup",
     "mouseenter", "mouseleave", "mouseover", "mouseout",
@@ -106,27 +133,36 @@
         if (mutation.type === "childList") {
           for (const node of mutation.addedNodes) {
             if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
             const trigger = inferTrigger(mutation.target);
-            console.log(`${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${node.outerHTML}`);
+            const summary = `${prefix} [+${elapsed()}s] [added] [${formatTrigger(trigger)}] ${describeTarget(node)}`;
+            logEntry(summary, node.outerHTML);
           }
           for (const node of mutation.removedNodes) {
             if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
             const trigger = inferTrigger(mutation.target);
-            console.log(`${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${node.outerHTML}`);
+            const summary = `${prefix} [+${elapsed()}s] [removed] [${formatTrigger(trigger)}] ${describeTarget(node)}`;
+            logEntry(summary, node.outerHTML);
           }
         } else if (mutation.type === "attributes") {
-          const trigger = inferTrigger(mutation.target);
           const el = mutation.target;
+          if (!matchesFilter(el)) continue;
+          const trigger = inferTrigger(el);
           const attr = mutation.attributeName;
           const oldVal = mutation.oldValue;
           const newVal = el.getAttribute(attr);
-          console.log(`${prefix} [+${elapsed()}s] [attr] [${formatTrigger(trigger)}] ${describeTarget(el)} ${attr}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`);
+          const summary = `${prefix} [+${elapsed()}s] [attr] [${formatTrigger(trigger)}] ${describeTarget(el)} ${attr}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
+          logEntry(summary, null);
         } else if (mutation.type === "characterData") {
-          const trigger = inferTrigger(mutation.target.parentElement || mutation.target);
+          const parentEl = mutation.target.parentElement || mutation.target;
+          if (!matchesFilter(parentEl)) continue;
+          const trigger = inferTrigger(parentEl);
           const oldVal = mutation.oldValue;
           const newVal = mutation.target.textContent;
           const parent = describeTarget(mutation.target.parentElement);
-          console.log(`${prefix} [+${elapsed()}s] [text] [${formatTrigger(trigger)}] ${parent}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`);
+          const summary = `${prefix} [+${elapsed()}s] [text] [${formatTrigger(trigger)}] ${parent}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`;
+          logEntry(summary, null);
         }
       }
     });

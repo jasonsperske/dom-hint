@@ -21,6 +21,7 @@ function createEnv(storageOverrides = {}) {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
     ...storageOverrides,
   };
 
@@ -45,11 +46,28 @@ function createEnv(storageOverrides = {}) {
     },
   };
 
+  const groups = [];
+  let currentGroup = null;
+
   window.console.log = (...args) => {
+    const line = args.join(" ");
+    if (currentGroup) {
+      currentGroup.detail.push(line);
+    }
+    logs.push(line);
+  };
+
+  window.console.groupCollapsed = (...args) => {
+    currentGroup = { summary: args.join(" "), detail: [] };
+    groups.push(currentGroup);
     logs.push(args.join(" "));
   };
 
-  return { dom, window, logs, changeListeners, triggerStorageChange: (changes) => {
+  window.console.groupEnd = () => {
+    currentGroup = null;
+  };
+
+  return { dom, window, logs, groups, changeListeners, triggerStorageChange: (changes) => {
     changeListeners.forEach((fn) => fn(changes));
   }};
 }
@@ -143,7 +161,9 @@ describe("hotkey activation", () => {
 
 describe("childList mutations (element inserts & deletes)", () => {
   test("logs added elements", async () => {
-    const { window, logs } = createEnv();
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+    });
     await injectScript(window);
 
     simulateClick(window, window.document.body, { ctrl: true, alt: true });
@@ -328,7 +348,9 @@ describe("log prefix", () => {
 
 describe("trigger inference", () => {
   test("attributes click trigger to synchronous mutations", async () => {
-    const { window, logs } = createEnv();
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "" },
+    });
     await injectScript(window);
 
     simulateClick(window, window.document.body, { ctrl: true, alt: true });
@@ -457,5 +479,210 @@ describe("combined mutation types", () => {
       logs.some((l) => l.includes("[added]") && l.includes("fallback-test")),
       "Should fall back to childList tracking"
     );
+  });
+});
+
+describe("grouped output", () => {
+  test("uses groupCollapsed when grouped is enabled", async () => {
+    const { window, logs, groups } = createEnv({
+      output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    groups.length = 0;
+
+    const el = window.document.createElement("div");
+    el.id = "grouped-el";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const group = groups.find((g) => g.summary.includes("[added]"));
+    assert.ok(group, "Should use groupCollapsed for the entry");
+    assert.ok(group.summary.includes("div#grouped-el"), "Summary has element descriptor");
+    assert.ok(group.detail.some((d) => d.includes("<div")), "Detail contains outerHTML");
+  });
+
+  test("uses flat log when grouped is disabled", async () => {
+    const { window, logs, groups } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+    groups.length = 0;
+
+    const el = window.document.createElement("span");
+    el.textContent = "flat";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(groups.length, 0, "Should not use groupCollapsed");
+    assert.ok(logs.some((l) => l.includes("[added]") && l.includes("<span>")), "Should log inline");
+  });
+});
+
+describe("max HTML length", () => {
+  test("truncates long HTML when grouped is disabled", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 30, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.setAttribute("data-long", "a".repeat(100));
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const addLog = logs.find((l) => l.includes("[added]"));
+    assert.ok(addLog, "Should have an [added] log");
+    assert.ok(addLog.includes("…"), "Should have truncation marker");
+    assert.ok(!addLog.includes("a".repeat(100)), "Should not contain full attribute");
+  });
+
+  test("does not truncate short HTML", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 500, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("b");
+    el.textContent = "hi";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const addLog = logs.find((l) => l.includes("[added]"));
+    assert.ok(addLog, "Should have an [added] log");
+    assert.ok(!addLog.includes("…"), "Should not be truncated");
+    assert.ok(addLog.includes("<b>hi</b>"), "Should contain full HTML");
+  });
+
+  test("shows full HTML inside group when grouped is enabled", async () => {
+    const { window, groups } = createEnv({
+      output: { grouped: true, maxHtmlLength: 10, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    groups.length = 0;
+
+    const el = window.document.createElement("div");
+    el.setAttribute("data-long", "b".repeat(100));
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const group = groups.find((g) => g.summary.includes("[added]"));
+    assert.ok(group, "Should have a group");
+    assert.ok(group.detail.some((d) => d.includes("b".repeat(100))), "Group detail has full HTML");
+  });
+});
+
+describe("selector filter", () => {
+  test("only logs mutations matching the selector", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "#target" },
+    });
+    await injectScript(window);
+
+    const root = window.document.getElementById("root");
+    const target = window.document.createElement("div");
+    target.id = "target";
+    root.appendChild(target);
+
+    const other = window.document.createElement("div");
+    other.id = "other";
+    root.appendChild(other);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const child1 = window.document.createElement("span");
+    child1.className = "inside-target";
+    target.appendChild(child1);
+
+    const child2 = window.document.createElement("span");
+    child2.className = "inside-other";
+    other.appendChild(child2);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("inside-target")), "Should log mutation inside #target");
+    assert.ok(!logs.some((l) => l.includes("inside-other")), "Should not log mutation inside #other");
+  });
+
+  test("logs all mutations when selector is empty", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.className = "unfiltered";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("unfiltered")), "Should log without filter");
+  });
+
+  test("treats invalid selector as no filter", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "[[[invalid" },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const el = window.document.createElement("div");
+    el.className = "invalid-selector-test";
+    window.document.getElementById("root").appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("invalid-selector-test")), "Should log despite invalid selector");
+  });
+
+  test("filters attribute mutations by selector", async () => {
+    const { window, logs } = createEnv({
+      mutationTypes: { childList: false, attributes: true, characterData: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: ".watched" },
+    });
+    await injectScript(window);
+
+    const root = window.document.getElementById("root");
+    const watched = window.document.createElement("div");
+    watched.className = "watched";
+    root.appendChild(watched);
+
+    const ignored = window.document.createElement("div");
+    ignored.className = "ignored";
+    root.appendChild(ignored);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    watched.setAttribute("data-x", "1");
+    ignored.setAttribute("data-y", "2");
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("data-x")), "Should log attribute on .watched");
+    assert.ok(!logs.some((l) => l.includes("data-y")), "Should not log attribute on .ignored");
   });
 });

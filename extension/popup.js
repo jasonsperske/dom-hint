@@ -32,6 +32,7 @@ async function init() {
     prefix: "dom-hint:",
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    output: { grouped: true, maxHtmlLength: 200, selectorFilter: "" },
   });
   prefixInput.value = settings.prefix;
   $("#mod-ctrl").checked = settings.hotkeys.ctrl;
@@ -41,6 +42,9 @@ async function init() {
   $("#mut-childlist").checked = settings.mutationTypes.childList;
   $("#mut-attributes").checked = settings.mutationTypes.attributes;
   $("#mut-characterdata").checked = settings.mutationTypes.characterData;
+  $("#opt-grouped").checked = settings.output.grouped;
+  $("#opt-maxhtml").value = settings.output.maxHtmlLength;
+  $("#opt-selector").value = settings.output.selectorFilter;
 }
 
 function updateStatus(injected) {
@@ -116,11 +120,18 @@ function saveSettings() {
       attributes: $("#mut-attributes").checked,
       characterData: $("#mut-characterdata").checked,
     },
+    output: {
+      grouped: $("#opt-grouped").checked,
+      maxHtmlLength: parseInt($("#opt-maxhtml").value, 10) || 200,
+      selectorFilter: $("#opt-selector").value.trim(),
+    },
   });
 }
 
 prefixInput.addEventListener("input", saveSettings);
-document.querySelectorAll("fieldset input").forEach((cb) => {
+$("#opt-selector").addEventListener("input", saveSettings);
+$("#opt-maxhtml").addEventListener("change", saveSettings);
+document.querySelectorAll("fieldset input[type='checkbox']").forEach((cb) => {
   cb.addEventListener("change", saveSettings);
 });
 
