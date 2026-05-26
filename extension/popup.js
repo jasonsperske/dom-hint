@@ -33,6 +33,7 @@ async function init() {
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    triggers: { network: true, timers: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
               ignoreList: "", debounceMs: 0 },
     scope: { head: false, shadowRoots: false, iframes: false },
@@ -48,6 +49,8 @@ async function init() {
   $("#mut-childlist").checked = settings.mutationTypes.childList;
   $("#mut-attributes").checked = settings.mutationTypes.attributes;
   $("#mut-characterdata").checked = settings.mutationTypes.characterData;
+  $("#trig-network").checked = settings.triggers.network;
+  $("#trig-timers").checked = settings.triggers.timers;
   $("#opt-grouped").checked = settings.output.grouped;
   $("#opt-maxhtml").value = settings.output.maxHtmlLength;
   $("#opt-selector").value = settings.output.selectorFilter;
@@ -139,6 +142,10 @@ function saveSettings() {
       childList: $("#mut-childlist").checked,
       attributes: $("#mut-attributes").checked,
       characterData: $("#mut-characterdata").checked,
+    },
+    triggers: {
+      network: $("#trig-network").checked,
+      timers: $("#trig-timers").checked,
     },
     output: {
       grouped: $("#opt-grouped").checked,

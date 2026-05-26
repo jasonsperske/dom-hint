@@ -7,17 +7,19 @@
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    triggers: { network: true, timers: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
               ignoreList: "", debounceMs: 0 },
     scope: { head: false, shadowRoots: false, iframes: false },
   };
-  let { prefix, hotkeys, activation, mutationTypes, output, scope } = await chrome.storage.sync.get(defaults);
+  let { prefix, hotkeys, activation, mutationTypes, triggers, output, scope } = await chrome.storage.sync.get(defaults);
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.prefix) prefix = changes.prefix.newValue;
     if (changes.hotkeys) hotkeys = changes.hotkeys.newValue;
     if (changes.activation) activation = changes.activation.newValue;
     if (changes.mutationTypes) mutationTypes = changes.mutationTypes.newValue;
+    if (changes.triggers) triggers = changes.triggers.newValue;
     if (changes.output) output = changes.output.newValue;
     if (changes.scope) scope = changes.scope.newValue;
   });
@@ -39,11 +41,15 @@
   });
 
   const SYNC_THRESHOLD_MS = 80;
+  const NETWORK_THRESHOLD_MS = 500;
+  const TIMER_THRESHOLD_MS = 200;
   let watching = false;
   let startTime = null;
   let observer = null;
   let shadowObservers = [];
   let recentEvents = [];
+  let recentNetworkEvents = [];
+  let recentTimerFires = [];
 
   function elapsed() {
     return ((Date.now() - startTime) / 1000).toFixed(1);
@@ -58,9 +64,156 @@
     return desc;
   }
 
+  // --- Network interception ---
+  const originalFetch = typeof window.fetch === "function" ? window.fetch : null;
+  const originalXhrOpen = typeof XMLHttpRequest !== "undefined" ? XMLHttpRequest.prototype.open : null;
+  const originalXhrSend = typeof XMLHttpRequest !== "undefined" ? XMLHttpRequest.prototype.send : null;
+  let networkPatched = false;
+
+  function patchNetwork() {
+    if (networkPatched) return;
+    networkPatched = true;
+
+    if (!originalFetch) return;
+
+    window.fetch = function (input, init) {
+      const method = (init && init.method) || "GET";
+      const url = typeof input === "string" ? input : (input.url || String(input));
+      const parentTrigger = getLastUserEvent();
+      return originalFetch.apply(this, arguments).then((response) => {
+        if (watching) {
+          recentNetworkEvents.push({
+            type: "fetch", method: method.toUpperCase(), url: shortenUrl(url),
+            status: response.status, time: performance.now(), parentTrigger,
+          });
+          if (recentNetworkEvents.length > 30) recentNetworkEvents = recentNetworkEvents.slice(-20);
+        }
+        return response;
+      });
+    };
+
+    if (!originalXhrOpen || !originalXhrSend) return;
+
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__domHintMethod = method.toUpperCase();
+      this.__domHintUrl = shortenUrl(String(url));
+      this.__domHintParent = getLastUserEvent();
+      return originalXhrOpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function () {
+      this.addEventListener("load", () => {
+        if (watching) {
+          recentNetworkEvents.push({
+            type: "xhr", method: this.__domHintMethod, url: this.__domHintUrl,
+            status: this.status, time: performance.now(),
+            parentTrigger: this.__domHintParent,
+          });
+          if (recentNetworkEvents.length > 30) recentNetworkEvents = recentNetworkEvents.slice(-20);
+        }
+      });
+      return originalXhrSend.apply(this, arguments);
+    };
+  }
+
+  function unpatchNetwork() {
+    if (!networkPatched) return;
+    networkPatched = false;
+    if (originalFetch) window.fetch = originalFetch;
+    if (originalXhrOpen) XMLHttpRequest.prototype.open = originalXhrOpen;
+    if (originalXhrSend) XMLHttpRequest.prototype.send = originalXhrSend;
+  }
+
+  // --- Timer interception ---
+  const originalSetTimeout = window.setTimeout;
+  const originalSetInterval = window.setInterval;
+  const originalClearTimeout = window.clearTimeout;
+  const originalClearInterval = window.clearInterval;
+  let timersPatched = false;
+  const timerRegistry = new Map();
+
+  function patchTimers() {
+    if (timersPatched) return;
+    timersPatched = true;
+
+    window.setTimeout = function (fn, delay, ...args) {
+      const parentTrigger = getLastUserEvent();
+      const scheduledAt = performance.now();
+      const id = originalSetTimeout.call(window, function () {
+        timerRegistry.delete(id);
+        if (watching) {
+          recentTimerFires.push({
+            type: "timeout", delay: delay || 0, scheduledAt, time: performance.now(),
+            parentTrigger,
+          });
+          if (recentTimerFires.length > 30) recentTimerFires = recentTimerFires.slice(-20);
+        }
+        if (typeof fn === "function") fn.apply(this, args);
+        else eval(fn);
+      }, delay, ...args);
+      timerRegistry.set(id, { type: "timeout", delay, parentTrigger, scheduledAt });
+      return id;
+    };
+
+    window.setInterval = function (fn, delay, ...args) {
+      const parentTrigger = getLastUserEvent();
+      const scheduledAt = performance.now();
+      const id = originalSetInterval.call(window, function () {
+        if (watching) {
+          recentTimerFires.push({
+            type: "interval", delay: delay || 0, scheduledAt, time: performance.now(),
+            parentTrigger,
+          });
+          if (recentTimerFires.length > 30) recentTimerFires = recentTimerFires.slice(-20);
+        }
+        if (typeof fn === "function") fn.apply(this, args);
+        else eval(fn);
+      }, delay, ...args);
+      timerRegistry.set(id, { type: "interval", delay, parentTrigger, scheduledAt });
+      return id;
+    };
+
+    window.clearTimeout = function (id) {
+      timerRegistry.delete(id);
+      return originalClearTimeout.call(window, id);
+    };
+
+    window.clearInterval = function (id) {
+      timerRegistry.delete(id);
+      return originalClearInterval.call(window, id);
+    };
+  }
+
+  function unpatchTimers() {
+    if (!timersPatched) return;
+    timersPatched = false;
+    window.setTimeout = originalSetTimeout;
+    window.setInterval = originalSetInterval;
+    window.clearTimeout = originalClearTimeout;
+    window.clearInterval = originalClearInterval;
+    timerRegistry.clear();
+  }
+
+  // --- Causal chain helpers ---
+  function shortenUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      return u.pathname + (u.search ? u.search.slice(0, 30) : "");
+    } catch {
+      return url.slice(0, 60);
+    }
+  }
+
+  function getLastUserEvent() {
+    if (recentEvents.length === 0) return null;
+    const last = recentEvents[recentEvents.length - 1];
+    return { type: last.type, target: describeTarget(last.target), time: last.time };
+  }
+
   function inferTrigger(mutationTarget) {
     const now = performance.now();
 
+    // 1. Check synchronous user events
     for (let i = recentEvents.length - 1; i >= 0; i--) {
       const evt = recentEvents[i];
       const age = now - evt.time;
@@ -80,6 +233,30 @@
       return { type: evt.type, target: describeTarget(evt.target), age: Math.round(age) };
     }
 
+    // 2. Check recent timer fires
+    for (let i = recentTimerFires.length - 1; i >= 0; i--) {
+      const timer = recentTimerFires[i];
+      const age = now - timer.time;
+      if (age > TIMER_THRESHOLD_MS) break;
+      return buildChain({
+        type: timer.type, age: Math.round(age),
+        delay: timer.delay, parentTrigger: timer.parentTrigger,
+      });
+    }
+
+    // 3. Check recent network completions
+    for (let i = recentNetworkEvents.length - 1; i >= 0; i--) {
+      const net = recentNetworkEvents[i];
+      const age = now - net.time;
+      if (age > NETWORK_THRESHOLD_MS) break;
+      return buildChain({
+        type: net.type, method: net.method, url: net.url,
+        status: net.status, age: Math.round(age),
+        parentTrigger: net.parentTrigger,
+      });
+    }
+
+    // 4. Fallback to async/unknown
     if (recentEvents.length > 0) {
       const last = recentEvents[recentEvents.length - 1];
       const age = now - last.time;
@@ -94,11 +271,33 @@
     return { type: "unknown", target: "", age: -1 };
   }
 
+  function buildChain(trigger) {
+    if (trigger.parentTrigger) {
+      trigger.chain = [trigger.parentTrigger];
+    }
+    return trigger;
+  }
+
   function formatTrigger(trigger) {
     if (trigger.type === "unknown") return "unknown";
     if (trigger.type === "async")
       return `async ~${trigger.age}ms after ${trigger.lastEvent} on ${trigger.target}`;
-    return `${trigger.type} on ${trigger.target} ~${trigger.age}ms ago`;
+
+    let desc;
+    if (trigger.type === "fetch" || trigger.type === "xhr") {
+      desc = `${trigger.type} ${trigger.method} ${trigger.url} (${trigger.status}) ~${trigger.age}ms ago`;
+    } else if (trigger.type === "timeout" || trigger.type === "interval") {
+      desc = `${trigger.type} (${trigger.delay}ms) ~${trigger.age}ms ago`;
+    } else {
+      desc = `${trigger.type} on ${trigger.target} ~${trigger.age}ms ago`;
+    }
+
+    if (trigger.chain && trigger.chain.length > 0) {
+      const origin = trigger.chain[0];
+      desc = `${origin.type} on ${origin.target} → ${desc}`;
+    }
+
+    return desc;
   }
 
   function truncateHtml(html) {
@@ -347,7 +546,11 @@
     startTime = Date.now();
     mutationCount = 0;
     recentEvents = [];
+    recentNetworkEvents = [];
+    recentTimerFires = [];
     startListeners();
+    if (triggers.network) patchNetwork();
+    if (triggers.timers) patchTimers();
     startObserver();
     showIndicator();
     console.log(`${prefix} started watching for Document mutations`);
@@ -358,6 +561,8 @@
     if (debounceTimer) { clearTimeout(debounceTimer); flushDebounce(); }
     stopObserver();
     stopListeners();
+    unpatchNetwork();
+    unpatchTimers();
     hideIndicator();
     watching = false;
     const seconds = ((Date.now() - startTime) / 1000).toFixed(1);
