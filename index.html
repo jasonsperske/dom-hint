@@ -26,7 +26,8 @@
   <h3>Attribute &amp; text mutations</h3>
   <div>
     <button id="toggle-class-btn">Toggle class on box</button>
-    <button id="change-text-btn">Change text content</button>
+    <button id="change-text-btn">Replace text (textContent)</button>
+    <button id="edit-text-btn">Edit text node (nodeValue)</button>
     <span id="demo-box" class="tooltip-target">Demo box</span>
   </div>
 
@@ -107,7 +108,16 @@
     let textCount = 0;
     document.getElementById("change-text-btn").addEventListener("click", () => {
       textCount++;
-      document.getElementById("demo-box").textContent = `Updated ${textCount}`;
+      document.getElementById("demo-box").textContent = `Replaced ${textCount}`;
+    });
+
+    let editCount = 0;
+    document.getElementById("edit-text-btn").addEventListener("click", () => {
+      editCount++;
+      const box = document.getElementById("demo-box");
+      if (box.firstChild && box.firstChild.nodeType === Node.TEXT_NODE) {
+        box.firstChild.nodeValue = `Edited ${editCount}`;
+      }
     });
 
     // Shadow DOM setup

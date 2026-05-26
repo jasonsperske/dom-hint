@@ -341,6 +341,52 @@ describe("characterData mutations (text changes)", () => {
     assert.ok(textLog.includes('"after"'), "Should show new value");
   });
 
+  test("logs textContent replacement as text+/text-", async () => {
+    const { window, logs } = createEnv({
+      mutationTypes: { childList: true, attributes: false, characterData: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    const el = window.document.getElementById("root");
+    el.textContent = "original";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    el.textContent = "replaced";
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logs.some((l) => l.includes("[text-]") && l.includes('"original"')),
+      "Should log removal of old text node");
+    assert.ok(logs.some((l) => l.includes("[text+]") && l.includes('"replaced"')),
+      "Should log addition of new text node");
+  });
+
+  test("does not log text node changes when characterData disabled", async () => {
+    const { window, logs } = createEnv({
+      mutationTypes: { childList: true, attributes: false, characterData: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    const el = window.document.getElementById("root");
+    el.textContent = "original";
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    el.textContent = "replaced";
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!logs.some((l) => l.includes("[text")),
+      "Should not log text node changes when characterData is off");
+  });
+
   test("does not log text changes when disabled", async () => {
     const { window, logs } = createEnv({
       mutationTypes: { childList: true, attributes: false, characterData: false },
