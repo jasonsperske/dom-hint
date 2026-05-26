@@ -425,6 +425,17 @@
     for (const mutation of mutations) {
       if (mutation.type === "childList") {
         for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.TEXT_NODE && mutationTypes.characterData) {
+            if (!matchesFilter(mutation.target)) continue;
+            const trigger = inferTrigger(mutation.target);
+            const target = describeTarget(mutation.target);
+            const summary = `${prefix} [+${elapsed()}s] [text+] [${formatTrigger(trigger)}] ${target}: ${JSON.stringify(node.textContent)}`;
+            logEntry(summary, null, {
+              timestamp: Date.now(), elapsed: elapsed(), type: "text+",
+              trigger, target, newValue: node.textContent,
+            });
+            continue;
+          }
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
           if (isIgnored(node)) continue;
           if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
@@ -438,6 +449,17 @@
           if (scope.shadowRoots) observeShadowRoots(node);
         }
         for (const node of mutation.removedNodes) {
+          if (node.nodeType === Node.TEXT_NODE && mutationTypes.characterData) {
+            if (!matchesFilter(mutation.target)) continue;
+            const trigger = inferTrigger(mutation.target);
+            const target = describeTarget(mutation.target);
+            const summary = `${prefix} [+${elapsed()}s] [text-] [${formatTrigger(trigger)}] ${target}: ${JSON.stringify(node.textContent)}`;
+            logEntry(summary, null, {
+              timestamp: Date.now(), elapsed: elapsed(), type: "text-",
+              trigger, target, oldValue: node.textContent,
+            });
+            continue;
+          }
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
           if (isIgnored(node)) continue;
           if (!matchesFilter(node) && !matchesFilter(mutation.target)) continue;
