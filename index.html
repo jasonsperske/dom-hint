@@ -43,6 +43,14 @@
     <button id="head-meta-btn">Add &lt;meta&gt; tag to head</button>
   </div>
 
+  <h3>Trigger attribution</h3>
+  <div>
+    <button id="fetch-btn">Fetch &rarr; DOM update</button>
+    <button id="timer-btn">setTimeout &rarr; DOM update (500ms)</button>
+    <button id="chain-btn">Click &rarr; fetch &rarr; setTimeout &rarr; DOM</button>
+    <div id="trigger-output"></div>
+  </div>
+
   <h3>List</h3>
   <div>
     <button id="add-btn">Add item</button>
@@ -137,6 +145,38 @@
       meta.name = `x-test-${metaCount}`;
       meta.content = `value-${metaCount}`;
       document.head.appendChild(meta);
+    });
+
+    // Trigger attribution demos
+    const triggerOutput = document.getElementById("trigger-output");
+
+    document.getElementById("fetch-btn").addEventListener("click", () => {
+      fetch("data:application/json,{\"ok\":true}").then(() => {
+        const el = document.createElement("div");
+        el.textContent = "Added after fetch";
+        el.style.color = "blue";
+        triggerOutput.appendChild(el);
+      });
+    });
+
+    document.getElementById("timer-btn").addEventListener("click", () => {
+      setTimeout(() => {
+        const el = document.createElement("div");
+        el.textContent = "Added after setTimeout(500)";
+        el.style.color = "green";
+        triggerOutput.appendChild(el);
+      }, 500);
+    });
+
+    document.getElementById("chain-btn").addEventListener("click", () => {
+      fetch("data:application/json,{\"step\":1}").then(() => {
+        setTimeout(() => {
+          const el = document.createElement("div");
+          el.textContent = "Added after click → fetch → setTimeout";
+          el.style.color = "purple";
+          triggerOutput.appendChild(el);
+        }, 200);
+      });
     });
   </script>
 

@@ -22,6 +22,7 @@ function createEnv(storageOverrides = {}) {
     hotkeys: { ctrl: true, alt: true, shift: false, meta: false },
     activation: { toggleMode: false, showIndicator: true, autoStart: false },
     mutationTypes: { childList: true, attributes: false, characterData: false },
+    triggers: { network: false, timers: false },
     output: { grouped: true, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
               ignoreList: "", debounceMs: 0 },
     scope: { head: false, shadowRoots: false, iframes: false },
@@ -61,6 +62,15 @@ function createEnv(storageOverrides = {}) {
         return Promise.resolve({ ok: true });
       },
     },
+  };
+
+  // Mock fetch for network tracking tests
+  window.fetch = function (input, init) {
+    return Promise.resolve({
+      status: 200,
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
   };
 
   const groups = [];
@@ -1364,5 +1374,194 @@ describe("toggle via message", () => {
 
     await sendMessage({ action: "toggleObserver" });
     assert.ok(logs.some((l) => l.includes("stopped listening")), "Should stop via message");
+  });
+});
+
+describe("network trigger attribution", () => {
+  test("attributes mutations after fetch to the fetch call", async () => {
+    const { window, logs } = createEnv({
+      triggers: { network: true, timers: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    // Simulate a fetch then DOM mutation
+    await window.fetch("/api/data");
+    await new Promise((r) => setTimeout(r, 10));
+
+    const el = window.document.createElement("div");
+    el.className = "after-fetch";
+    window.document.getElementById("root").appendChild(el);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const fetchLog = logs.find((l) => l.includes("after-fetch"));
+    assert.ok(fetchLog, "Should log the mutation");
+    assert.ok(fetchLog.includes("fetch") && fetchLog.includes("/api/data"), "Should attribute to fetch");
+  });
+
+  test("does not patch fetch when network tracking disabled", async () => {
+    const { window } = createEnv({
+      triggers: { network: false, timers: false },
+    });
+    const origFetch = window.fetch;
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // fetch should not have been wrapped
+    assert.strictEqual(window.fetch, origFetch, "Should not patch fetch when disabled");
+  });
+
+  test("restores fetch on stop", async () => {
+    const { window } = createEnv({
+      triggers: { network: true, timers: false },
+    });
+    const origFetch = window.fetch;
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.notStrictEqual(window.fetch, origFetch, "Should patch fetch while watching");
+
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(window.fetch, origFetch, "Should restore fetch after stop");
+  });
+});
+
+describe("timer trigger attribution", () => {
+  test("attributes mutations after setTimeout to the timer", async () => {
+    const { window, logs } = createEnv({
+      triggers: { network: false, timers: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    // Use the patched setTimeout - it should fire, add to recentTimerFires, then the mutation handler checks it
+    window.setTimeout(() => {
+      const el = window.document.createElement("div");
+      el.className = "after-timer";
+      window.document.getElementById("root").appendChild(el);
+    }, 20);
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    const timerLog = logs.find((l) => l.includes("after-timer"));
+    assert.ok(timerLog, "Should log the mutation");
+    assert.ok(timerLog.includes("timeout"), "Should attribute to timeout");
+  });
+
+  test("does not patch timers when timer tracking disabled", async () => {
+    const { window } = createEnv({
+      triggers: { network: false, timers: false },
+    });
+    await injectScript(window);
+
+    const origSetTimeout = window.setTimeout;
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(window.setTimeout, origSetTimeout, "Should not patch timers when disabled");
+  });
+
+  test("restores timers on stop", async () => {
+    const { window } = createEnv({
+      triggers: { network: false, timers: true },
+    });
+    await injectScript(window);
+
+    const origSetTimeout = window.setTimeout;
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    simulateKeyup(window, window.document.body, { ctrl: false, alt: false });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(window.setTimeout, origSetTimeout, "Should restore setTimeout after stop");
+  });
+});
+
+describe("causal chain", () => {
+  test("includes parent user event in network trigger", async () => {
+    const { window, logs } = createEnv({
+      triggers: { network: true, timers: false },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    // Create a button, click it, which triggers a fetch after a delay
+    const btn = window.document.createElement("button");
+    btn.id = "chain-trigger";
+    window.document.getElementById("root").appendChild(btn);
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    btn.addEventListener("click", async () => {
+      await window.fetch("/api/chain");
+      // Wait >80ms so user event ages out of sync threshold
+      await new Promise((r) => setTimeout(r, 100));
+      const el = window.document.createElement("div");
+      el.className = "chain-result";
+      window.document.getElementById("root").appendChild(el);
+    });
+
+    simulateClick(window, btn, {});
+    await new Promise((r) => setTimeout(r, 150));
+
+    const chainLog = logs.find((l) => l.includes("chain-result"));
+    assert.ok(chainLog, "Should log the chained mutation");
+    assert.ok(chainLog.includes("click") && chainLog.includes("fetch"),
+      "Should show causal chain from click through fetch");
+  });
+
+  test("includes parent user event in timer trigger", async () => {
+    const { window, logs } = createEnv({
+      triggers: { network: false, timers: true },
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false,
+                ignoreList: "", debounceMs: 0 },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const btn = window.document.createElement("button");
+    btn.id = "timer-chain";
+    window.document.getElementById("root").appendChild(btn);
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    btn.addEventListener("click", () => {
+      // Use delay >80ms so user event ages out of sync threshold
+      window.setTimeout(() => {
+        const el = window.document.createElement("div");
+        el.className = "timer-chain-result";
+        window.document.getElementById("root").appendChild(el);
+      }, 100);
+    });
+
+    simulateClick(window, btn, {});
+    await new Promise((r) => setTimeout(r, 150));
+
+    const chainLog = logs.find((l) => l.includes("timer-chain-result"));
+    assert.ok(chainLog, "Should log the timer-chained mutation");
+    assert.ok(chainLog.includes("click") && chainLog.includes("timeout"),
+      "Should show causal chain from click through timeout");
   });
 });
