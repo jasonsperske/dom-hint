@@ -240,6 +240,25 @@ describe("childList mutations (element inserts & deletes)", () => {
     await new Promise((r) => setTimeout(r, 10));
     assert.ok(!logs.some((l) => l.includes("[added]")));
   });
+
+  test("logs elements another extension inserts directly under <html>", async () => {
+    const { window, logs } = createEnv();
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const overlay = window.document.createElement("div");
+    overlay.id = "third-party-overlay";
+    window.document.documentElement.appendChild(overlay);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(
+      logs.some((l) => l.includes("[added]") && l.includes("third-party-overlay")),
+      "should observe insertions that are siblings of <body>"
+    );
+  });
 });
 
 describe("attribute mutations", () => {
@@ -1055,6 +1074,62 @@ describe("shadow DOM observation", () => {
 
     await new Promise((r) => setTimeout(r, 10));
     assert.ok(logs.some((l) => l.includes("dynamic-shadow")), "Should observe dynamically added shadow root");
+  });
+
+  test("observes shadow roots attached to pre-existing elements after watching starts", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: false, shadowRoots: true },
+    });
+    await injectScript(window);
+
+    // A host element that exists before watching begins, with no shadow root yet.
+    const host = window.document.createElement("div");
+    host.id = "preexisting-host";
+    window.document.getElementById("root").appendChild(host);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    // Another extension attaches a shadow root to the existing element and populates it.
+    const shadow = host.attachShadow({ mode: "open" });
+    const el = window.document.createElement("span");
+    el.className = "late-attached";
+    shadow.appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(
+      logs.some((l) => l.includes("late-attached")),
+      "should observe shadow roots attached to elements that pre-date the observer"
+    );
+  });
+
+  test("observes closed shadow roots when scope.shadowRoots is enabled", async () => {
+    const { window, logs } = createEnv({
+      output: { grouped: false, maxHtmlLength: 200, selectorFilter: "", recordLog: false },
+      scope: { head: false, shadowRoots: true },
+    });
+    await injectScript(window);
+
+    simulateClick(window, window.document.body, { ctrl: true, alt: true });
+    await new Promise((r) => setTimeout(r, 10));
+    logs.length = 0;
+
+    const host = window.document.createElement("div");
+    window.document.getElementById("root").appendChild(host);
+    // Mode "closed" — host.shadowRoot will return null, but attachShadow's
+    // return value is the live root and is what other extensions retain.
+    const shadow = host.attachShadow({ mode: "closed" });
+    const el = window.document.createElement("span");
+    el.className = "closed-root-child";
+    shadow.appendChild(el);
+
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(
+      logs.some((l) => l.includes("closed-root-child")),
+      "should observe mutations inside closed shadow roots"
+    );
   });
 
   test("stops observing shadow roots on deactivation", async () => {
