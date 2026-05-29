@@ -8,7 +8,32 @@ const prefixInput = $("#prefix");
 let currentTab = null;
 let currentDomain = "";
 
+const MOD_LABELS = {
+  mac: { ctrl: "⌃ Control", alt: "⌥ Option", shift: "⇧ Shift", meta: "⌘ Command" },
+  win: { ctrl: "Ctrl", alt: "Alt", shift: "Shift", meta: "⊞ Win" },
+  linux: { ctrl: "Ctrl", alt: "Alt", shift: "Shift", meta: "Super" },
+  other: { ctrl: "Ctrl", alt: "Alt", shift: "Shift", meta: "Meta" },
+};
+
+function detectOs() {
+  const p = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  if (p.includes("mac")) return "mac";
+  if (p.includes("win")) return "win";
+  if (p.includes("linux") || p.includes("x11")) return "linux";
+  return "other";
+}
+
+function applyOsHotkeyLabels() {
+  const labels = MOD_LABELS[detectOs()];
+  document.querySelectorAll(".mod-label").forEach((el) => {
+    const key = el.dataset.mod;
+    if (labels[key]) el.textContent = labels[key];
+  });
+}
+
 async function init() {
+  applyOsHotkeyLabels();
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   currentTab = tab;
 
