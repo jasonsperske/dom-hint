@@ -421,8 +421,14 @@
     return opts;
   }
 
+  function isInHead(node) {
+    const el = node && node.nodeType === Node.ELEMENT_NODE ? node : node && node.parentElement;
+    return !!(el && document.head && document.head.contains(el));
+  }
+
   function handleMutations(mutations) {
     for (const mutation of mutations) {
+      if (!scope.head && isInHead(mutation.target)) continue;
       if (mutation.type === "childList") {
         for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.TEXT_NODE && mutationTypes.characterData) {
@@ -502,30 +508,58 @@
     }
   }
 
+  function observeShadowRoot(root) {
+    if (!root || root.__domHintObserved) return;
+    root.__domHintObserved = true;
+    const shadowObs = new MutationObserver(handleMutations);
+    shadowObs.observe(root, getObserverOptions());
+    shadowObservers.push(shadowObs);
+    observeShadowRoots(root);
+  }
+
   function observeShadowRoots(root) {
     const elements = root.querySelectorAll ? [root, ...root.querySelectorAll("*")] : [root];
     for (const el of elements) {
-      if (el.shadowRoot && !el.shadowRoot.__domHintObserved) {
-        el.shadowRoot.__domHintObserved = true;
-        const shadowObs = new MutationObserver(handleMutations);
-        shadowObs.observe(el.shadowRoot, getObserverOptions());
-        shadowObservers.push(shadowObs);
-        observeShadowRoots(el.shadowRoot);
-      }
+      if (el.shadowRoot) observeShadowRoot(el.shadowRoot);
     }
+  }
+
+  // --- Shadow DOM patching ---
+  // Captures shadow roots that other extensions (or page scripts) attach to
+  // already-present elements after we start watching. attachShadow's return
+  // value is the actual root even for { mode: "closed" } — patching here is
+  // the only reliable way to observe closed shadow roots.
+  const originalAttachShadow =
+    typeof Element !== "undefined" ? Element.prototype.attachShadow : null;
+  let shadowPatched = false;
+
+  function patchAttachShadow() {
+    if (shadowPatched || !originalAttachShadow) return;
+    shadowPatched = true;
+    Element.prototype.attachShadow = function (init) {
+      const root = originalAttachShadow.call(this, init);
+      if (watching && scope.shadowRoots) observeShadowRoot(root);
+      return root;
+    };
+  }
+
+  function unpatchAttachShadow() {
+    if (!shadowPatched || !originalAttachShadow) return;
+    shadowPatched = false;
+    Element.prototype.attachShadow = originalAttachShadow;
   }
 
   function startObserver() {
     observer = new MutationObserver(handleMutations);
     const opts = getObserverOptions();
-    observer.observe(document.body, opts);
-
-    if (scope.head) {
-      observer.observe(document.head, opts);
-    }
+    // Root at documentElement so we see siblings of <body> (overlays/banners
+    // that other extensions inject directly under <html>) and <head>
+    // mutations. The handler filters head mutations when scope.head is off.
+    observer.observe(document.documentElement, opts);
 
     if (scope.shadowRoots) {
-      observeShadowRoots(document.body);
+      observeShadowRoots(document.documentElement);
+      patchAttachShadow();
     }
   }
 
@@ -538,6 +572,7 @@
       obs.disconnect();
     }
     shadowObservers = [];
+    unpatchAttachShadow();
   }
 
   let indicator = null;
@@ -573,8 +608,11 @@
     startListeners();
     if (triggers.network) patchNetwork();
     if (triggers.timers) patchTimers();
-    startObserver();
+    // Show the indicator before starting the observer so its own insertion
+    // isn't reported as a mutation (it lives under <html>, which is now
+    // inside the observer's root).
     showIndicator();
+    startObserver();
     console.log(`${prefix} started watching for Document mutations`);
   }
 
